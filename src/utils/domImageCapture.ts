@@ -160,6 +160,48 @@ export const downloadBlobFile = (blob: Blob, filename: string): void => {
   link.remove()
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), IMAGE_OBJECT_URL_REVOKE_DELAY_MS)
 }
+
+/**
+ * クリップボードへ画像をコピーする。
+ *
+ * @param blob - コピーする画像のBlob。
+ * @returns なし。
+ */
+export const copyImageFileToClipboard = async (blob: Blob): Promise<void> => {
+  if (typeof navigator === 'undefined' || typeof navigator.clipboard === 'undefined') {
+    throw new Error('Clipboard API is not available.')
+  }
+  // NOTE: 画像コピーはimage/pngのほうが都合がいいので、image/jpegはimage/pngに変換してコピーする。
+  if (blob.type === 'image/jpeg') {
+    const imageBitmap = await createImageBitmap(blob)
+    const canvas = document.createElement('canvas')
+    canvas.width = imageBitmap.width
+    canvas.height = imageBitmap.height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) {
+      throw new Error('Failed to get 2D context from canvas.')
+    }
+    ctx.drawImage(imageBitmap, 0, 0)
+    const pngBlob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
+    if (!pngBlob) {
+      throw new Error('Failed to convert JPEG to PNG.')
+    }
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        'image/png': pngBlob,
+      }),
+    ])
+  } else if (blob.type === 'image/png') {
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        'image/png': blob,
+      }),
+    ])
+  } else {
+    throw new Error(`Unsupported image type: ${blob.type}`)
+  }
+}
+
 /**
  * 現在のブラウザが指定ファイルのWeb Share API共有に対応しているかを返す。
  *

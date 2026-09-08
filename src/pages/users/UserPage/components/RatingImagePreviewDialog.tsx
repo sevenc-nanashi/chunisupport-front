@@ -1,7 +1,7 @@
 import { Dialog } from '@kobalte/core/dialog'
-import { Download, ImageDown, Share2, X } from 'lucide-solid'
+import { Clipboard, ClipboardCheck, Download, ImageDown, Share2, X } from 'lucide-solid'
 import type { Component } from 'solid-js'
-import { createEffect, createSignal, onCleanup, Show, untrack } from 'solid-js'
+import { createEffect, createSignal, Match, onCleanup, Show, Switch, untrack } from 'solid-js'
 import { Loading } from '../../../../components'
 import {
   AppButton,
@@ -14,6 +14,7 @@ import type { HonorDTO, PlayerDTO, UserRatingDTO } from '../../../../types/api'
 import {
   canShareFiles,
   captureElementAsImage,
+  copyImageFileToClipboard,
   downloadBlobFile,
 } from '../../../../utils/domImageCapture'
 import { buildChunithmJacketUrl } from '../../../../utils/jacket'
@@ -50,6 +51,9 @@ export const RatingImagePreviewDialog: Component<Props> = (props) => {
   const [isDownloading, setIsDownloading] = createSignal(false)
   const [isPreparingShare, setIsPreparingShare] = createSignal(false)
   const [isSharing, setIsSharing] = createSignal(false)
+  // クリップボードはコピーされたことがわかりにくいので、一回コピーボタンを押したら
+  // コピー済の表示をするようにする
+  const [copyState, setCopyState] = createSignal<'idle' | 'copying' | 'copied'>('idle')
   const [shareImageFile, setShareImageFile] = createSignal<File>()
   const [imageActionError, setImageActionError] = createSignal<string>()
   const [previewViewport, setPreviewViewport] = createSignal<HTMLDivElement>()
@@ -124,6 +128,7 @@ export const RatingImagePreviewDialog: Component<Props> = (props) => {
       readyJacketKeys.clear()
       setReadyJacketCount(0)
       setShareImageFile(undefined)
+      setCopyState('idle')
     }
     setOpen(nextOpen)
     if (!nextOpen) setImageActionError(undefined)
@@ -221,9 +226,33 @@ export const RatingImagePreviewDialog: Component<Props> = (props) => {
     }
   }
 
+  /**
+   * 現在のプレビュー画像をクリップボードにコピーする。
+   *
+   * @returns コピー処理の完了時に解決されるPromise。
+   */
+  const copyRatingImageToClipboard = async (): Promise<void> => {
+    const imageFile = shareImageFile()
+    if (!imageFile) {
+      void prepareShareImage()
+      return
+    }
+
+    setCopyState('copying')
+    setImageActionError(undefined)
+
+    try {
+      await copyImageFileToClipboard(imageFile)
+      setCopyState('copied')
+    } catch {
+      setImageActionError(RATING_IMAGE_COPY.shareError)
+      setCopyState('idle')
+    }
+  }
+
   // 共有ダイアログをクリック直後に開けるよう、プレビュー完成時点でファイルを準備する。
   createEffect(() => {
-    if (!open() || !isPreviewReady() || !canShareRatingImage()) return
+    if (!open() || !isPreviewReady()) return
 
     untrack(() => void prepareShareImage())
   })
@@ -345,26 +374,59 @@ export const RatingImagePreviewDialog: Component<Props> = (props) => {
                 )}
               </Show>
               <div class="flex flex-wrap justify-end gap-2">
-                <AppButton
-                  variant="secondary"
-                  disabled={!canShareRatingImage() || isImageActionRunning() || !isPreviewReady()}
-                  aria-busy={isPreparingShare() || isSharing()}
-                  onClick={shareRatingImage}
-                  leftIcon={
-                    <Show
-                      when={!isPreparingShare() && !isSharing()}
-                      fallback={<Loading size="inline" ariaHidden />}
+                <Show
+                  when={canShareRatingImage()}
+                  fallback={
+                    <AppButton
+                      variant="secondary"
+                      disabled={isImageActionRunning() || !isPreviewReady()}
+                      aria-busy={isPreparingShare() || copyState() === 'copying'}
+                      onClick={copyRatingImageToClipboard}
+                      leftIcon={
+                        <Switch>
+                          <Match when={isPreparingShare() || copyState() === 'copying'}>
+                            <Loading size="inline" ariaHidden />
+                          </Match>
+                          <Match when={copyState() === 'copied'}>
+                            <ClipboardCheck class="h-4 w-4" aria-hidden="true" />
+                          </Match>
+                          <Match when={copyState() === 'idle'}>
+                            <Clipboard class="h-4 w-4" aria-hidden="true" />
+                          </Match>
+                        </Switch>
+                      }
                     >
-                      <Share2 class="h-4 w-4" aria-hidden="true" />
-                    </Show>
+                      {isPreparingShare()
+                        ? RATING_IMAGE_COPY.preparingShare
+                        : copyState() === 'copying'
+                          ? RATING_IMAGE_COPY.copying
+                          : copyState() === 'copied'
+                            ? RATING_IMAGE_COPY.copied
+                            : RATING_IMAGE_COPY.copy}
+                    </AppButton>
                   }
                 >
-                  {isPreparingShare()
-                    ? RATING_IMAGE_COPY.preparingShare
-                    : isSharing()
-                      ? RATING_IMAGE_COPY.sharing
-                      : RATING_IMAGE_COPY.share}
-                </AppButton>
+                  <AppButton
+                    variant="secondary"
+                    disabled={isImageActionRunning() || !isPreviewReady()}
+                    aria-busy={isPreparingShare() || isSharing()}
+                    onClick={shareRatingImage}
+                    leftIcon={
+                      <Show
+                        when={!isPreparingShare() && !isSharing()}
+                        fallback={<Loading size="inline" ariaHidden />}
+                      >
+                        <Share2 class="h-4 w-4" aria-hidden="true" />
+                      </Show>
+                    }
+                  >
+                    {isPreparingShare()
+                      ? RATING_IMAGE_COPY.preparingShare
+                      : isSharing()
+                        ? RATING_IMAGE_COPY.sharing
+                        : RATING_IMAGE_COPY.share}
+                  </AppButton>
+                </Show>
                 <AppButton
                   variant="primary"
                   disabled={isImageActionRunning() || !isPreviewReady()}
